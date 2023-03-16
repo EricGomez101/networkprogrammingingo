@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net"
 	"syscall"
@@ -10,8 +11,9 @@ import (
 
 func main() {
 	t := testing.T{}
-	TestDial(&t)
+	//TestDial(&t)
 
+	TestDialTimeout(&t)
 }
 
 func TestListener(t *testing.T) {
@@ -95,6 +97,7 @@ func DialTimeout(network, address string, timeout time.Duration) (net.Conn, erro
 	return d.Dial(network, address)
 }
 
+// call on dialtimeout that returns a dialer struct with an overwritten control method.
 func TestDialTimeout(t *testing.T) {
 	c, err := DialTimeout("tcp", "10.0.0.1:http", 5*time.Second)
 	if err != nil {
@@ -109,5 +112,36 @@ func TestDialTimeout(t *testing.T) {
 
 	if !nErr.Timeout() {
 		t.Fatal("error is not a timeout")
+	}
+}
+
+func TestDialContext(t *testing.T) {
+	dl := time.Now().Add(5 * time.Second)
+	ctx, cancel := context.WithDeadline(context.Background(), dl)
+	defer cancel()
+
+	var d net.Dialer
+	d.Control = func(_, _ string, _ syscall.RawConn) error {
+		time.Sleep(5*time.Second + time.Millisecond)
+		return nil
+	}
+
+	conn, err := d.DialContext(ctx, "tcp", "10.0.0.0:80")
+	if err == nil {
+		conn.Close()
+		t.Fatal("Connection did not time out")
+	}
+
+	nErr, ok := err.(net.Error)
+
+	if !ok {
+		t.Error(err)
+	} else {
+		if !nErr.Timeout() {
+			t.Errorf("Error is not a timeout: %v", err)
+		}
+	}
+	if ctx.Err() != context.DeadlineExceeded {
+		t.Errorf("Expected deadline exceeded; actual: %v", ctx.Err())
 	}
 }
